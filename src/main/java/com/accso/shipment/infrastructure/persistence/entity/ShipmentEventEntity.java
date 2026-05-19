@@ -11,8 +11,10 @@ import java.time.Instant;
 
 /**
  * JPA mapping for {@code shipment_event} — immutable ingest audit (every POST writes a row;
- * docs/ANALYSIS.md §7.1, §7.4). UK on {@code (partner, event_id)}; Phase 2 adds
- * {@code uk_partner_natural_key} and nullable {@code event_id} for natural-key partners.
+ * docs/ANALYSIS.md §7.1, §7.4). Surrogate {@code id}: BIGINT IDENTITY (Liquibase 002
+ * {@code autoIncrement: true}; {@link GenerationType#IDENTITY}). UK on
+ * {@code (partner, event_id)} for event-id partners; nullable {@code event_id} for natural-key
+ * partners (Liquibase 003); no natural-key UK (004).
  */
 @Entity
 @Table(name = "shipment_event")

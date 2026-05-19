@@ -2,6 +2,7 @@ package com.accso.shipment.infrastructure.dedupe;
 
 import com.accso.shipment.application.command.IngestShipmentEventCommand;
 import com.accso.shipment.application.dedupe.DedupeStrategy;
+import com.accso.shipment.domain.model.Disposition;
 import com.accso.shipment.infrastructure.persistence.entity.ShipmentEventEntity;
 import com.accso.shipment.infrastructure.persistence.mapper.ShipmentPersistenceMapper;
 import com.accso.shipment.infrastructure.persistence.repository.ShipmentEventRepository;
@@ -28,15 +29,23 @@ public class NaturalKeyDedupeStrategy implements DedupeStrategy {
 
     @Override
     public boolean isDuplicate(IngestShipmentEventCommand command) {
-        return eventRepository.existsByPartnerAndShipmentIdAndStatusAndOccurredAt(
-                command.partner(), command.shipmentId(), command.status(), command.occurredAt());
+        return eventRepository.existsByPartnerAndShipmentIdAndStatusAndOccurredAtAndDispositionIsNot(
+                command.partner(),
+                command.shipmentId(),
+                command.status(),
+                command.occurredAt(),
+                Disposition.DUPLICATE.name());
     }
 
     @Override
     public Optional<String> findCanonicalPayloadHash(IngestShipmentEventCommand command) {
         return eventRepository
-                .findFirstByPartnerAndShipmentIdAndStatusAndOccurredAtOrderByIdAsc(
-                        command.partner(), command.shipmentId(), command.status(), command.occurredAt())
+                .findFirstByPartnerAndShipmentIdAndStatusAndOccurredAtAndDispositionIsNotOrderByIdAsc(
+                        command.partner(),
+                        command.shipmentId(),
+                        command.status(),
+                        command.occurredAt(),
+                        Disposition.DUPLICATE.name())
                 .map(ShipmentEventEntity::getPayloadHash);
     }
 

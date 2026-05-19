@@ -44,8 +44,12 @@ If diagrams look like code blocks only, your viewer does not support Mermaid —
 
 - **Phase 1 dedupe:** `(partner, event_id)` — `eventId` required  
 - **Phase 2 adds:** `(partner, shipment_id, status, occurred_at)` for configured partners (e.g. `acme`)  
-- **Phase 2 does not change:** status rules, API shapes, audit model, `state_explanation`, history sort  
+- **Phase 2 does not change:** status rules, API shapes, audit model, `state_explanation`, history sort, **`shipment_event.id`** (BIGINT auto-increment from Liquibase `002`)  
+
+**Schema note:** Phase 2 ERD diagrams still show `bigint id PK` for completeness; only `003`/`004` migrate dedupe columns — see ERD § Phase 2.
 
 **Parent doc:** [`../ANALYSIS.md`](../ANALYSIS.md) (approved for implementation).
 
-**Latest reconciliation:** 2026-05-19 — `DATABASE_ERD.md` and `CLASS_DIAGRAM.md` updated to match **Phase 1 as implemented** (code is source of truth for Commit 1). Phase 2 sections remain planned deltas only.
+**Latest reconciliation:** 2026-05-19 — Phase 1 + Phase 2 as implemented. **Dedupe:** partner rules in `DedupeStrategy` (service), not a single DB UK on `shipment_event` — see ANALYSIS §6.4, ERD § Dedupe enforcement, CLASS_DIAGRAM § Dedupe enforcement.
+
+**As-built deltas from initial diagrams:** each design doc has an **§ Implementation reconciliation** section (ANALYSIS §14, ERD, CLASS_DIAGRAM, ADR 002) — lists what changed during coding and how we detected it (tests, walkthrough, Liquibase).

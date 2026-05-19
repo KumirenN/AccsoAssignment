@@ -113,16 +113,18 @@ Do **not** ship Phase 2 classes, config, or DB constraints in Commit 1.
 | `NaturalKeyDedupeStrategy` | Yes |
 | `DedupeStrategy` / resolver | Yes (introduced when we add second strategy) |
 | `PartnerConfigProperties` / `acme` partner | Yes |
-| `uk_partner_natural_key` DB constraint | Yes |
+| `uk_partner_natural_key` DB constraint | Yes *(planned)* |
 | Nullable / optional `eventId` for ingest | Yes |
 | Natural-key integration tests | Yes |
+
+**As-built note (Phase 2):** `uk_partner_natural_key` was **not** kept — see §6.4 and §14 row 2. Nullable `event_id` and natural-key tests **are** in the codebase.
 
 **Phase 1 dedupe implementation:** Check `existsByPartnerAndEventId` before insert; on duplicate → full audit row with synthetic `event_id` (`::dup::` suffix) and HTTP 200. The DB unique key `uk_partner_event_id` remains as a safety net. No strategy interface yet.
 
 ### 5.3 Phase 1 — Liquibase
 
 - `001` — `shipment` table  
-- `002` — `shipment_event` table, `event_id` **NOT NULL**, `uk_partner_event_id`, timeline index  
+- `002` — `shipment_event` table; surrogate `id` **BIGINT auto-increment** (IDENTITY) PK; `event_id` **NOT NULL**; `uk_partner_event_id`; timeline index  
 
 See [`docs/design/DATABASE_ERD.md`](design/DATABASE_ERD.md) § Phase 1.
 
@@ -152,9 +154,32 @@ See [`docs/design/DATABASE_ERD.md`](design/DATABASE_ERD.md) § Phase 1.
 | Code | `DedupeStrategy`, `EventIdDedupeStrategy`, `NaturalKeyDedupeStrategy`, `DedupeStrategyResolver`; refactor ingest to use resolver |
 | Dedupe rule | `(partner, shipment_id, status, occurred_at)` — **ignore `receivedAt`** |
 | `eventId` | **Null or omitted** allowed for natural-key partners only |
-| Liquibase `003` | `event_id` nullable; `uk_partner_natural_key` |
+| Liquibase `003` / `004` | `003`: `event_id` nullable; `004`: drop natural-key UK (see §6.4). **`id` unchanged** — auto-increment from `002` |
+| `shipment_event.id` | **BIGINT IDENTITY** (PoC) — DB assigns; JPA `GenerationType.IDENTITY`; never set in application code |
 | Tests | Change-request scenario (resend same update, different `receivedAt` → duplicate) |
 | README | What changed, what stayed same, production gaps |
+
+### 6.4 Dedupe vs database constraints (issue found in Phase 2)
+
+**Problem:** We want **multiple duplicate-detection strategies** (event-id for `dhl`, natural-key for `acme`) on a **single** `shipment_event` audit table. Courier-specific business rules do not map cleanly to one set of database unique constraints:
+
+| Tension | Detail |
+|---------|--------|
+| One table, many rules | Each partner can define “duplicate” differently; a column set that is unique for `acme` is irrelevant for `dhl` and vice versa. |
+| Full audit on duplicates | Every ingest must store a row, including `DUPLICATE`. A **full** UK on `(partner, shipment_id, status, occurred_at)` rejects the second row when the natural key matches the first **accepted** row — exactly what step 12 needs to record. |
+| Partial / filtered UK | Ideal fix: unique only where `disposition <> 'DUPLICATE'`. **H2 (assignment DB) does not support** filtered unique indexes; we hit this implementing `ChangeRequestIntegrationTest` step 12. |
+| Alternatives not taken | **Separate table per courier** — isolates constraints but multiplies schema and queries. **Per-partner DB** — operational cost. Kept **simple**: one table, partner logic in code. |
+
+**Resolution (implemented):**
+
+| Layer | What we do |
+|-------|------------|
+| **Application** | `DedupeStrategy` per partner type (`EventIdDedupeStrategy`, `NaturalKeyDedupeStrategy`) resolved from `application.yml`. **Uniqueness that defines a duplicate lives in the service** — proactive `exists…` checks before insert, plus disposition rules in §7.1. |
+| **Database (event-id partners)** | Keep `uk_partner_event_id` on `(partner, event_id)`. Duplicate **audit** rows use a **synthetic** `event_id` (`::dup::` suffix) so the UK does not block storing retries (ADR 002, Phase 1). |
+| **Database (natural-key partners)** | **No** `uk_partner_natural_key` in the running schema (Liquibase `004` drops it if `003` created it). Natural-key dedupe is **service-enforced only** for this PoC. |
+| **Production note** | On **PostgreSQL**, a partial unique index (`WHERE disposition <> 'DUPLICATE'`) could reinforce `acme` without blocking audit rows — optional hardening, not required for H2. |
+
+**Takeaway for reviewers:** Duplicate detection is **intentionally partner-specific application logic**, not a single global DB constraint on `shipment_event`. Status projection rules (§7.2–§7.3) remain shared; only dedupe keys differ by partner.
 
 ### 6.2 Phase 2 — What stays the same
 
@@ -183,14 +208,19 @@ These apply in **Phase 1 and Phase 2**. Only **dedupe** differs by phase/partner
 - Do not change current status on duplicate.  
 - Return **200** with `duplicate: true`.  
 - Same key, different body → `payloadMismatch: true`, keep first accept, WARN log.
+- **Note:** “Different body” includes any change in the **stored raw JSON** (e.g. only `receivedAt` differs on retry). The **dedupe key** may ignore `receivedAt` (natural-key partners, §6.1), but payload hash does not — so Phase 2 step 12 and Phase 1 step 3 both return `duplicate: true` and `payloadMismatch: true` when only `receivedAt` changes.
 
-**Dedupe key (varies by phase/partner):**
+**Dedupe key (varies by partner — enforced in application, see §6.4):**
 
-| Phase | Partner type | Key |
-|-------|--------------|-----|
-| 1 | All | `(partner, eventId)` |
-| 2 | event-id (e.g. dhl) | `(partner, eventId)` |
-| 2 | natural-key (e.g. acme) | `(partner, shipmentId, status, occurredAt)` |
+| Partner type | Logical duplicate key | DB constraint |
+|--------------|----------------------|---------------|
+| event-id (e.g. `dhl`) | `(partner, eventId)` | `uk_partner_event_id` + synthetic `event_id` on duplicate audit rows |
+| natural-key (e.g. `acme`) | `(partner, shipmentId, status, occurredAt)` — `receivedAt` ignored | **None** on H2; `DedupeStrategy` + repository `exists…` |
+
+| Phase | Scope |
+|-------|--------|
+| 1 | All partners used event-id path |
+| 2 | Per-partner strategy via yaml |
 
 ### 7.2 Out-of-order
 
@@ -342,14 +372,15 @@ README will link to `WALKTHROUGH.md` under “Try it”.
 
 ## 11. Deliverables map
 
-| Assignment asks for | Where |
-|---------------------|--------|
-| Working solution + run instructions | Repo + `README.md` |
-| Problem, assumptions, trade-offs, limitations, change request | **`README.md` indexes → this doc** (§1–§3, §6–§7, §10) + ADRs |
-| 2 ADRs | `docs/adr/001-*.md`, `002-*.md` |
-| Tests (rules + integration + change request) | `src/test/java` (Phase 2 tests added in Commit 2) |
-| AI process note + work / audit trail | `docs/DEVELOPMENT_PROCESS.md` |
-| ERD + technical design | `docs/design/` |
+| # | Assignment asks for | Where |
+|---|---------------------|--------|
+| 1 | Working solution + run in ≤5 min | Repo + [`README.md`](README.md) Quick start · `mvnw` |
+| 2 | README: framing, assumptions, trade-offs, limitations, change request | [`README.md`](README.md) (summary) + **this doc** (§1–§3, §6–§7, §10, §14) |
+| 3 | 2 ADRs (decision, alternatives, why) | [`docs/adr/001`](adr/001-forward-only-shipment-status-projection.md), [`002`](adr/002-deduplication-strategy-and-database-constraints.md) |
+| 4 | Tests: rules + integration + change request | `StateProjectorTest`, `ShipmentFlowIntegrationTest`, `ChangeRequestIntegrationTest` — [`README.md`](README.md) Tests |
+| 5 | AI process note + override example | [`docs/DEVELOPMENT_PROCESS.md`](DEVELOPMENT_PROCESS.md) §0, §4, §11 |
+| — | ERD + technical design | [`docs/design/`](design/README.md) |
+| — | Hands-on verification | [`docs/WALKTHROUGH.md`](WALKTHROUGH.md) |
 
 ---
 
@@ -381,7 +412,7 @@ Update [`DEVELOPMENT_PROCESS.md`](DEVELOPMENT_PROCESS.md) (session log, mileston
 
 | Doc | Role |
 |-----|------|
-| **This file** | Problem, assumptions, **Phase 1 vs Phase 2** scope |
+| **This file** | Problem, assumptions, **Phase 1 vs Phase 2** scope, **§14 as-built deltas** |
 | [`docs/design/DATABASE_ERD.md`](design/DATABASE_ERD.md) | Tables — Phase 1 vs Phase 2 schema |
 | [`docs/design/CLASS_DIAGRAM.md`](design/CLASS_DIAGRAM.md) | Classes — Phase 1 vs Phase 2 code |
 | [`docs/design/README.md`](design/README.md) | How to view Mermaid diagrams |
@@ -391,4 +422,29 @@ Update [`DEVELOPMENT_PROCESS.md`](DEVELOPMENT_PROCESS.md) (session log, mileston
 
 ---
 
-*Status: **Phase 1 implemented** (2026-05-19). Design: [`docs/design/`](design/README.md) reconciled to code. **Commit 1** = Phase 1 baseline push; **Commit 2** = change request (Phase 2).*
+*Status: **Phase 1 + Phase 2 implemented** (2026-05-19). All assignment deliverables mapped in §11 and root [`README.md`](../README.md). Design: [`docs/design/`](design/README.md) reconciled to code.*
+
+---
+
+## 14. Implementation reconciliation (deltas from initial design)
+
+This section **adds** as-built notes. Earlier sections are kept as the original design intent and assignment narrative; where they differ from code, the table below is authoritative for reviewers.
+
+| # | Initial design / doc wording | As implemented | How we picked it up |
+|---|------------------------------|----------------|---------------------|
+| 1 | §2: dedupe via **DB unique key** for all partners | **`dhl` only:** `uk_partner_event_id` + proactive check. **`acme`:** no natural-key UK; dedupe in `NaturalKeyDedupeStrategy` | `ChangeRequestIntegrationTest` step 12 — full UK on natural key blocked `DUPLICATE` audit insert (`23505`); Liquibase `004` drops UK (§6.4) |
+| 2 | §5.2: `uk_partner_natural_key` **comes in Phase 2** | `003` added UK experimentally; **`004` drops it** — not in running schema | Same integration test failure; H2 has no partial unique index |
+| 3 | §10: dedupe **enforced by DB constraints** (general) | True for **event-id** partners only; natural-key is **application-enforced** | Phase 2 implementation + §6.4 |
+| 4 | Phase 2 plan: catch **`DataIntegrityViolationException`** on duplicate (ADR 002 early draft) | **Proactive** `exists…` before insert for both strategies; UK is backstop for `dhl` only | Phase 1 override (DEVELOPMENT_PROCESS §4); kept after strategy refactor |
+| 5 | Duplicate `event_id` pattern: `{eventId}::dup::{nano}` only | **`dhl`:** unchanged. **`acme` duplicates:** `nk::{partner}::{shipmentId}::{status}::{occurredAt}::dup::{nano}`; accepted rows may store **`event_id` NULL** | Needed unique DB `event_id` without partner-supplied id; visible in GET history (walkthrough step 13) |
+| 6 | `payloadMismatch: false` when only `receivedAt` changes on natural-key retry | **`payloadMismatch: true`** — hash is full raw JSON; dedupe key still ignores `receivedAt` | Runtime walkthrough Phase 2 step 12; aligned docs (approach A, DEVELOPMENT_PROCESS audit) |
+| 7 | §7.7 example strings (e.g. *“Updated to DELIVERED … (was OUT_FOR_DELIVERY)”*) | **`StateProjector.buildExplanation()`** uses different templates — e.g. *“Current status DELIVERED from event evt-2 (partner dhl) at …”*, *“Status remains …”* for no state change | Comparing GET `/shipments/{id}` to §7.7 table during walkthrough |
+| 8 | §7.7 / §8: invalid status only | Phase 2 adds **`MISSING_EVENT_ID`** (400) when event-id partner omits `eventId` — via `IngestResult.missingEventId()` + controller | `ChangeRequestIntegrationTest.givenDhlPartner_whenPostWithoutEventId_then400` |
+| 9 | `DedupeStrategy` placement (early diagrams) | Interface in **`application.dedupe`**; implementations in **`infrastructure.dedupe`** — keeps domain free of persistence | Refactor when adding second strategy (CLASS_DIAGRAM Phase 2) |
+| 10 | Natural-key “already seen” query | `exists…AndDispositionIsNot(…, DUPLICATE)` — prior **`DUPLICATE` rows do not satisfy** “canonical exists”; first **accepted** row is canonical for hash | Code review of `ShipmentEventRepository` + step 12 behaviour |
+| 11 | `stateExplanation` for `acme` without `eventId` | Text includes **`event null`** in template — deliberate visibility | Runtime GET shipment after step 11; left as-is by choice |
+| 12 | Walkthrough / §9 step mapping | Full guide is **steps 1–16 + optional + verify** — §9 table is a **summary**; see [`WALKTHROUGH.md`](WALKTHROUGH.md) | Expanded walkthrough during Phase 2 QA |
+
+**Still accurate from initial design:** three APIs, forward-only projection, RETURNED after DELIVERED, exception-wins, full audit, HTTP 200 on duplicate, history sort (§7.8), `processedEventCount` rules, yaml partner config.
+
+Cross-references: [`design/DATABASE_ERD.md`](design/DATABASE_ERD.md) § Implementation reconciliation · [`design/CLASS_DIAGRAM.md`](design/CLASS_DIAGRAM.md) § Implementation reconciliation · [`adr/002`](adr/002-deduplication-strategy-and-database-constraints.md) § Implementation reconciliation.

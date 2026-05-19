@@ -37,15 +37,24 @@ public interface ShipmentEventRepository extends JpaRepository<ShipmentEventEnti
     boolean existsByShipmentId(String shipmentId);
 
     /**
-     * Phase 2 natural-key duplicate detection — {@code (partner, shipment_id, status, occurred_at)}
-     * (docs/ANALYSIS.md §6.1); {@code receivedAt} ignored for dedupe.
+     * Phase 2 natural-key duplicate detection — same logical update already accepted (not a prior
+     * DUPLICATE audit row). {@code receivedAt} ignored for dedupe (docs/ANALYSIS.md §6.1).
      */
-    boolean existsByPartnerAndShipmentIdAndStatusAndOccurredAt(
-            String partner, String shipmentId, String status, java.time.Instant occurredAt);
+    boolean existsByPartnerAndShipmentIdAndStatusAndOccurredAtAndDispositionIsNot(
+            String partner,
+            String shipmentId,
+            String status,
+            java.time.Instant occurredAt,
+            String disposition);
 
     /**
-     * First canonical row for natural-key dedupe (payload hash on resend).
+     * First canonical (non-DUPLICATE) row for natural-key payload hash comparison.
      */
-    Optional<ShipmentEventEntity> findFirstByPartnerAndShipmentIdAndStatusAndOccurredAtOrderByIdAsc(
-            String partner, String shipmentId, String status, java.time.Instant occurredAt);
+    Optional<ShipmentEventEntity>
+            findFirstByPartnerAndShipmentIdAndStatusAndOccurredAtAndDispositionIsNotOrderByIdAsc(
+                    String partner,
+                    String shipmentId,
+                    String status,
+                    java.time.Instant occurredAt,
+                    String disposition);
 }

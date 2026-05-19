@@ -4,9 +4,11 @@
 **Time target:** 4–6 hours (record actual time in [§10](#10-time-spent))  
 **Design references:** [`ANALYSIS.md`](ANALYSIS.md) · [`adr/001`](adr/001-forward-only-shipment-status-projection.md) · [`adr/002`](adr/002-deduplication-strategy-and-database-constraints.md) · [`WALKTHROUGH.md`](WALKTHROUGH.md)
 
-This document satisfies the assignment requirement for a **development process note**: what AI tools were used, what they produced, what was verified or overridden, and at least one concrete example where human judgment diverged from the AI. It also serves as the merged work log for the project.
+This document satisfies assignment **deliverable #5**: what AI tools were used, what they produced, what was verified or overridden, and at least one concrete example where human judgment diverged from the AI. It also serves as the merged work log for the project.
 
 **Audit rule:** When correcting or clarifying AI output in chat, add a row to [§6 Clarifications & corrections](#6-clarifications--corrections-audit-trail).
+
+**Submission status (2026-05-19):** All five deliverables complete locally; final commit includes Liquibase `004`, doc reconciliation, and README aligned to the brief. See [§11](#11-assignment-deliverables--where-to-find-them).
 
 ---
 
@@ -14,6 +16,7 @@ This document satisfies the assignment requirement for a **development process n
 
 | § | Section |
 |---|---------|
+| [0](#0-assignment-deliverables--where-to-find-them) | Assignment deliverables — where to find them |
 | [1](#1-overall-workflow) | Overall workflow |
 | [2](#2-ai-tools--what-they-produced) | AI tools & what they produced |
 | [3](#3-verification-at-each-step) | Verification at each step |
@@ -24,6 +27,19 @@ This document satisfies the assignment requirement for a **development process n
 | [8](#8-milestones) | Milestones |
 | [9](#9-ai-usage-register) | AI usage register |
 | [10](#10-time-spent) | Time spent |
+| [11](#11-assignment-deliverables--where-to-find-them) | Assignment deliverables — index |
+
+---
+
+## 0. Assignment deliverables — where to find them
+
+| # | Brief requirement | Satisfied by | Verified how |
+|---|-------------------|--------------|--------------|
+| 1 | Working solution; clone & run ≤5 min | Root [`README.md`](../README.md) Quick start; `mvnw`, Java 17, H2 | `./mvnw test` + `spring-boot:run`; walkthrough curl |
+| 2 | README: framing, assumptions, trade-offs, limitations, change request | [`README.md`](../README.md) sections + [`ANALYSIS.md`](ANALYSIS.md) depth | Candidate review against PDF brief |
+| 3 | 2 ADRs (decision, alternatives, why) | [`adr/001`](adr/001-forward-only-shipment-status-projection.md), [`adr/002`](adr/002-deduplication-strategy-and-database-constraints.md) | Each has Decision, Alternatives considered, Consequences |
+| 4 | Tests: rules + integration + change request | `StateProjectorTest`, `ShipmentFlowIntegrationTest`, `ChangeRequestIntegrationTest` | 29 tests pass; mirrors `WALKTHROUGH.md` |
+| 5 | Development process note (AI + override) | **This file** — §2 tools, §3 verification, §4 override, §6 audit trail | Required §4 example: RETURNED after DELIVERED |
 
 ---
 
@@ -59,11 +75,11 @@ Cursor — scaffold base repo + implementation
 └───────────────────────────────────────────────────┘
     ▼
 ┌─ Phase 2 (Commit 2 — change request) ─────────────┐
-│  DB change (Liquibase 003, natural-key UK)        │
+│  DB change (Liquibase 003–004; id from 002 IDENTITY) │
 │  Rest of implementation (acme, dedupe strategies)│
 │  Validate solution & correct                      │
-│  Test: walkthrough steps 11–12 + integration tests│
-│  Push to git                                      │
+│  Test: walkthrough 11–16 + ChangeRequestIntegrationTest │
+│  Push to git (incl. Liquibase 004)                │
 └───────────────────────────────────────────────────┘
     ▼
   DONE
@@ -86,7 +102,7 @@ Cursor — scaffold base repo + implementation
 | Scaffold | **Cursor** | Design docs | `pom.xml`, Spring Boot app, entities, Liquibase `001`/`002`, smoke test |
 | Phase 1 code | **Cursor** | ERD + class diagram + analysis | Full ingest/query stack, `StateProjector`, unit + integration tests |
 | Phase 1 refactor | **Cursor** | Code review goals | Mapper, `DomainConfiguration`, clearer ingest paths |
-| Phase 2 | **Cursor** (planned) | Analysis §6 + design Phase 2 | `003` changelog, `DedupeStrategy`, `ChangeRequestIntegrationTest` |
+| Phase 2 | **Cursor** + candidate | Analysis §6 + design Phase 2 | `003`/`004` changelogs, `DedupeStrategy`, tests, walkthrough 11–16, doc §14 reconciliation |
 
 **Human control throughout:** stack lock-in (Java 17, Spring Boot, H2, Liquibase), integrity rules, git commit split (Phase 1 vs Phase 2), ADR reinstatement, and every row in the audit trail below.
 
@@ -102,7 +118,7 @@ AI was used for **agentic feature design** (multi-section docs, trade-off tables
 | Design | ERD columns/constraints match Liquibase; class diagram matches packages in `src/main/java` |
 | Scaffold | `./mvnw test` passes; Hibernate `validate` matches schema |
 | Phase 1 implementation | `./mvnw test` green (26 tests); [`WALKTHROUGH.md`](WALKTHROUGH.md) steps 1–10 at runtime (informal verification); integration tests mirror walkthrough |
-| Phase 2 (planned) | Walkthrough steps 11–12; `ChangeRequestIntegrationTest`; no Phase 2 code in Commit 1 |
+| Phase 2 | Walkthrough steps 11–16 + optional verify; `ChangeRequestIntegrationTest` (3 tests); `mvn test` green (29 tests) |
 
 **Runtime check (Phase 1):** After `./mvnw spring-boot:run`, I ran the walkthrough `curl` examples and compared responses to the **Expected** blocks — in addition to automated tests. See [Author notes in `WALKTHROUGH.md`](WALKTHROUGH.md#author-notes).
 
@@ -171,6 +187,8 @@ Full chronology: [§6](#6-clarifications--corrections-audit-trail).
 | 2026-05-19 | ERD/UML post-reconciliation | — | **Candidate verified** design docs | Session 9 |
 | 2026-05-19 | ERD/UML vs code | Diagram drift after implementation | Reconciled design docs to **implemented** Phase 1 | `docs/design/*` |
 | 2026-05-19 | Persistence stack | AI likely to suggest raw SQL or mock-heavy tests | **Pre-emptively requested Hibernate + Liquibase** for DB constraints and Phase 2 migrations | `ANALYSIS.md` §10, `pom.xml`, Liquibase changelogs |
+| 2026-05-19 | `shipment_event.id` in ERD vs Liquibase | Phase 2 ERD shows `bigint id` but **`004` only drops UK** — looked like `id` was missing | **`id` is Phase 1 (`002` `autoIncrement: true`)**; Phase 2 does not alter PK; documented in ERD, `004` comment, `ANALYSIS` §6.1 | `DATABASE_ERD.md`, `002`/`004`, `DEVELOPMENT_PROCESS.md` |
+| 2026-05-19 | Phase 2 step 12 `payloadMismatch` | Walkthrough expected `false` for acme retry | **Approach A:** align docs — full JSON hash includes `receivedAt`; expect `payloadMismatch: true` (same as Phase 1 step 3) | `WALKTHROUGH.md`, `ANALYSIS.md` §7.1, ADR 002 §4 |
 
 ---
 
@@ -216,21 +234,23 @@ Cursor scaffolded services and tests; candidate verified via `mvn test` and walk
 - [x] `StateProjectorTest` + `ShipmentFlowIntegrationTest` (walkthrough steps 1–10)
 - [x] Runtime verification via `WALKTHROUGH.md` (informal)
 - [x] 2 ADRs + this development process note
-- [ ] **Git push — Commit 1**
-- [x] Fresh-clone run verified (≤5 min) — `./mvnw test` on clean tree, 26 tests pass (2026-05-19)
+- [x] Git push — Commit 1 (`53cbb22` Initial commit on `main` / baseline)
+- [x] Fresh-clone run verified (≤5 min) — `./mvnw test` on clean tree (2026-05-19)
 
 ### Phase 2 (Commit 2 — change request)
 
-- [ ] Liquibase `003` (nullable `event_id`, `uk_partner_natural_key`)
-- [ ] `DedupeStrategy` + partner yaml (`acme` / `dhl`)
-- [ ] `ChangeRequestIntegrationTest` (walkthrough steps 11–12)
-- [ ] Validate + walkthrough runtime check
-- [ ] **Git push — Commit 2**
+- [x] Liquibase `003` (nullable `event_id`) + `004` (drop natural-key UK; `id` remains auto-increment from `002`)
+- [x] `DedupeStrategy` + partner yaml (`acme` / `dhl`)
+- [x] `ChangeRequestIntegrationTest` (walkthrough steps 11–12 + `dhl` missing `eventId`)
+- [x] Validate + walkthrough runtime check (steps 11–16, optional, GET history — 2026-05-19)
+- [x] All Phase 2 code + docs ready locally (pending final commit/push)
+- [ ] **Git push — Commit 2** on `feature/Phase2` (must include `004-natural-key-partial-index.yaml`)
 
 | Metric | Value |
 |--------|-------|
-| Baseline commit (pre-change-request) | _TBD_ |
-| Change request complete | _TBD_ |
+| Baseline commit (pre-change-request) | `53cbb22` Initial commit |
+| Phase 2 commit (partial, on branch) | `6e5b279` Phase 2 — **superseded by** final commit with `004` + docs |
+| Final push target | `feature/Phase2` → remote |
 
 ---
 
@@ -244,22 +264,38 @@ Cursor scaffolded services and tests; candidate verified via `mvn test` and walk
 | 2026-05-18 | Cursor | ADRs + development process | Yes | User restored ADRs; RETURNED override §4 |
 | 2026-05-18 | Cursor | ERD + UML class diagrams | Yes | Reconciled to analysis; later to code |
 | 2026-05-19 | Cursor | Scaffold + Phase 1 implementation | Yes | `mvn test` + walkthrough runtime |
-| _TBD_ | Cursor | Phase 2 change request | — | — |
+| 2026-05-19 | Cursor + candidate | Phase 2 complete; doc reconciliation §14 | Yes | `mvn test` + walkthrough curl |
+| 13 | 2026-05-19 | Assignment deliverables alignment | Cursor + candidate | README + DEVELOPMENT_PROCESS §0/§11; ADR “why” sections | Ready for final git push |
 
 ---
 
 ## 10. Time spent
 
-| Phase | Approx. time        |
-|-------|---------------------|
-| ChatGPT POA + Cursor analysis & decisions | 1.5 Hour            |
-| Tech design (ERD, UML, walkthrough) | 30 Minutes          |
-| Phase 1 scaffold + implementation + verification | 2 Hours             |
-| Phase 2 (planned) | _TBD_ |
-| **Total (Phase 1)** | **~4 hours** (within 4–6h assignment target) |
-
-_Phase 2 time to be recorded after Commit 2._
+| Phase | Approx. time                                 |
+|-------|----------------------------------------------|
+| ChatGPT POA + Cursor analysis & decisions | 1.5 Hour                                     |
+| Tech design (ERD, UML, walkthrough) | 30 Minutes                                   |
+| Phase 1 scaffold + implementation + verification | 2 Hours                                      |
+| Phase 2 implementation + verification + doc reconciliation | ~2.5 hours |
+| **Total (Phase 1 + 2)** | **~6.5 hours** (assignment target 4–6h; documented honestly) |
 
 ---
 
-*Maintain session rows, milestones, and the audit trail in this file as work progresses.*
+## 11. Assignment deliverables — index
+
+Duplicate of [§0](#0-assignment-deliverables--where-to-find-them) for reviewers landing here first.
+
+**Deliverable 5 (this document) — required elements:**
+
+| Element | Section |
+|---------|---------|
+| What AI tools were used | [§2](#2-ai-tools--what-they-produced) — ChatGPT (POA), Cursor (analysis, design, code, docs) |
+| What AI produced | §2 table (artifacts per step) |
+| What I verified / overrode | [§3](#3-verification-at-each-step), [§5](#5-other-verified--overridden-suggestions), [§6](#6-clarifications--corrections-audit-trail) |
+| **Concrete override** (judgment ≠ AI) | [§4](#4-concrete-override-example-required) — **RETURNED after DELIVERED** (primary); proactive dedupe + synthetic `event_id` (secondary) |
+
+**Other deliverables:** see [§0](#0-assignment-deliverables--where-to-find-them) and root [`README.md`](../README.md) checklist.
+
+---
+
+*Final update: 2026-05-19 — ready for commit and push of all local changes (including Liquibase `004` and README/deliverable alignment).*

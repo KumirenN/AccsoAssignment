@@ -40,6 +40,10 @@ We derive current status using a **forward-only lifecycle** with explicit ordina
 
 Implementation: domain `StateProjector` (pure Java, unit-tested without Spring).
 
+### Why we chose this
+
+Support and incident teams need a **stable current status** that reflects real-world progression, not webhook arrival order. Forward-only projection plus explicit RETURNED and exception rules is testable, matches the brief’s integrity goals, and avoids surprising regressions when old events arrive late.
+
 ## Alternatives considered
 
 | Alternative | Why not chosen |
