@@ -1,0 +1,55 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-shipment
+      author: accso
+      changes:
+        - createTable:
+            tableName: shipment
+            remarks: Denormalized current shipment view (Phase 1)
+            columns:
+              - column:
+                  name: shipment_id
+                  type: varchar(64)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: current_status
+                  type: varchar(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status_occurred_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: location
+                  type: varchar(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: state_explanation
+                  type: varchar(1024)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: processed_event_count
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: latest_delivered_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: true
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
