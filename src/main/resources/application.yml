@@ -38,3 +38,11 @@ logging:
   level:
     org.hibernate.SQL: WARN
     liquibase: INFO
+
+# Phase 2 — partner dedupe strategy (docs/ANALYSIS.md §6.1)
+shipment:
+  partners:
+    dhl:
+      dedupe-strategy: event-id
+    acme:
+      dedupe-strategy: natural-key

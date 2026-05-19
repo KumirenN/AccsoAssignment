@@ -10,6 +10,7 @@ databaseChangeLog:
               - column:
                   name: id
                   type: bigint
+                  remarks: Surrogate PK — BIGINT IDENTITY (auto-increment); application never assigns id
                   autoIncrement: true
                   constraints:
                     primaryKey: true

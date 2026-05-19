@@ -15,7 +15,7 @@
     <artifactId>shipment-tracking-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>shipment-tracking-service</name>
-    <description>Accso technical assignment — shipment event reconciliation (Phase 1)</description>
+    <description>Accso technical assignment — shipment event reconciliation (Phase 1 + Phase 2)</description>
 
     <properties>
         <java.version>17</java.version>

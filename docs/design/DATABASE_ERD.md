@@ -3,9 +3,9 @@
 **Source of truth with:** `[../ANALYSIS.md](../ANALYSIS.md)` (Phase 1 vs Phase 2)  
 **DB:** H2 in-memory (assignment) · **Schema:** Liquibase  
 
-**Commits:** Phase 1 schema in **Commit 1**. Phase 2 adds changelog `003` only in **Commit 2**.
+**Commits:** Phase 1 schema in **Commit 1**. Phase 2 adds changelogs `003`–`004` in **Commit 2**.
 
-**As-implemented (Phase 1):** Reconciled to match Liquibase `001`/`002` and JPA entities on 2026-05-19.
+**As-implemented:** Reconciled to match Liquibase and JPA entities (Phase 1 + Phase 2 dedupe decision documented in § Dedupe enforcement).
 
 ---
 
@@ -18,12 +18,13 @@ Diagrams use **Mermaid**. See `[README.md](README.md)` for how to view them.
 ## Phase overview
 
 
-|                       | Phase 1 (implemented)                   | Phase 2 (planned — Commit 2)                    |
-| --------------------- | --------------------------------------- | ----------------------------------------------- |
-| **Dedupe**            | `(partner, event_id)` — probe + UK      | + `(partner, shipment_id, status, occurred_at)` |
-| `**event_id` column** | NOT NULL                                | Nullable (natural-key partners)                 |
-| **Liquibase**         | `001`, `002`                            | + `003`                                         |
-| **Duplicate rows**    | Synthetic `event_id` (`::dup::` suffix) | Same pattern                                    |
+|                       | Phase 1 (implemented)                   | Phase 2 (implemented)                                      |
+| --------------------- | --------------------------------------- | ---------------------------------------------------------- |
+| **Dedupe**            | `(partner, event_id)` — service + UK    | Per-partner: event-id UK **or** natural-key **in service** |
+| **`event_id` column** | NOT NULL                                | Nullable (natural-key partners)                            |
+| **Liquibase**         | `001`, `002` (`id` BIGINT auto-increment PK) | + `003` (nullable `event_id`), `004` (drop natural-key UK; **no change to `id`**) |
+| **`shipment_event.id`** | `bigint` IDENTITY PK (002)              | Unchanged — still auto-increment; app never assigns |
+| **Duplicate rows**    | Synthetic `event_id` (`::dup::` suffix) | Same for event-id; natural-key uses synthetic `event_id` on duplicate rows |
 
 
 **Shared in both phases:** `shipment` + `shipment_event`, disposition column, full `raw_payload`, projection columns on `shipment`.
@@ -77,7 +78,7 @@ Column nullability, lengths, and Phase 1 `event_id` rules are in the table defin
 | Name                          | Type        | Columns                                       |
 | ----------------------------- | ----------- | --------------------------------------------- |
 | `pk_shipment`                 | PRIMARY KEY | `shipment_id`                                 |
-| `pk_shipment_event`           | PRIMARY KEY | `id`                                          |
+| `pk_shipment_event`           | PRIMARY KEY | `id` (BIGINT **auto-increment** / IDENTITY)   |
 | `**uk_partner_event_id`**     | **UNIQUE**  | `**(partner, event_id)`**                     |
 | `idx_event_shipment_timeline` | INDEX       | `(shipment_id, occurred_at, received_at, id)` |
 
@@ -105,15 +106,15 @@ db/changelog/
 
 ---
 
-## Phase 2 — Planned changes (Commit 2)
+## Phase 2 — Schema changes (Commit 2)
 
 ```mermaid
 erDiagram
     SHIPMENT ||--o{ SHIPMENT_EVENT : has
 
     SHIPMENT_EVENT {
-        bigint id PK
-        varchar event_id
+        bigint id PK "IDENTITY from 002"
+        varchar event_id "nullable for acme"
         varchar partner
         varchar shipment_id
         varchar status
@@ -121,23 +122,51 @@ erDiagram
     }
 ```
 
+| Changelog | Change |
+|-----------|--------|
+| `003-phase2-natural-key.yaml` | `event_id` **nullable** (was paired with experimental `uk_partner_natural_key`) |
+| `004-natural-key-partial-index.yaml` | **Drop** `uk_partner_natural_key` — see § Dedupe enforcement below |
 
+**`shipment_event.id` (not in 003/004):** The Phase 2 ERD still shows `bigint id PK` because every audit row needs a stable surrogate key for timeline ordering and tie-breaks. That column is created in **`002-create-shipment-event.yaml`** with `type: bigint` and `autoIncrement: true` (H2 **IDENTITY**). Phase 2 changelogs do **not** recreate or alter `id` — only dedupe-related columns/constraints change. JPA: `@GeneratedValue(strategy = GenerationType.IDENTITY)` on `ShipmentEventEntity` — the application never sets `id` on insert.
 
-Phase 2 adds `uk_partner_natural_key` on `(partner, shipment_id, status, occurred_at)`; `uk_partner_event_id` unchanged; `event_id` becomes nullable for natural-key partners.
-
-
-| Change                       | Detail                                                   |
-| ---------------------------- | -------------------------------------------------------- |
-| `event_id`                   | Alter to **nullable**                                    |
-| `**uk_partner_natural_key`** | **UNIQUE** `(partner, shipment_id, status, occurred_at)` |
-| Dedupe logic                 | `DedupeStrategyResolver` by partner config               |
-
+**`shipment` table:** no Phase 2 column changes.
 
 ```
-└── 003-phase2-natural-key.yaml
+db/changelog/
+├── 001-create-shipment.yaml
+├── 002-create-shipment-event.yaml
+├── 003-phase2-natural-key.yaml
+└── 004-natural-key-partial-index.yaml
 ```
 
-`**shipment` table:** no Phase 2 column changes.
+---
+
+## Dedupe enforcement — one table, multiple partner rules
+
+**Issue (found during Phase 2 implementation):** Several couriers share `shipment_event`, but each can use a **different** definition of “duplicate”. A single database unique constraint cannot express all of them without blocking legitimate audit rows.
+
+| Scenario | Why a global UK fails |
+|----------|------------------------|
+| Natural-key partner (`acme`) | Duplicate = same `(partner, shipment_id, status, occurred_at)` with a **new** `receivedAt`. We must **insert** a second row with `disposition = DUPLICATE` and the **same** natural key as the accepted row. A full UK on those four columns rejects that insert (`23505` in step 12). |
+| Event-id partner (`dhl`) | Duplicate = same `(partner, event_id)`. UK works **if** duplicate audit rows use a **synthetic** `event_id` (Phase 1 pattern). |
+| Multiple strategies | A constraint useful for `acme` is wrong for `dhl` (and vice versa). |
+
+**Alternatives considered:**
+
+| Approach | Verdict |
+|----------|---------|
+| **Separate table per courier** | Clear per-partner constraints; rejected for this assignment — more schema, joins, and ops complexity. |
+| **Partial unique index** (`WHERE disposition <> 'DUPLICATE'`) | Correct on PostgreSQL; **not supported on H2**, so not used for the PoC. |
+| **Application-layer dedupe (chosen)** | `DedupeStrategy` + yaml partner config; proactive checks before insert; keep `uk_partner_event_id` only where it fits. |
+
+**As-implemented constraints on `shipment_event`:**
+
+| Constraint | Partners | Purpose |
+|------------|----------|---------|
+| `uk_partner_event_id` on `(partner, event_id)` | event-id (e.g. `dhl`) | Backstop for duplicate `eventId`; duplicate **audit** rows avoid collision via `::dup::` synthetic `event_id` |
+| *(none)* on natural key columns | natural-key (e.g. `acme`) | Uniqueness of logical updates enforced in **`NaturalKeyDedupeStrategy`** (`exists…AndDispositionIsNot`) |
+
+Cross-reference: [`../ANALYSIS.md`](../ANALYSIS.md) §6.4 · [`CLASS_DIAGRAM.md`](CLASS_DIAGRAM.md) § Phase 2.
 
 ---
 
@@ -164,10 +193,10 @@ Phase 2 adds `uk_partner_natural_key` on `(partner, shipment_id, status, occurre
 
 | Column | Type | Purpose |
 |--------|---------|
-| `id` | `bigint` identity PK | Surrogate key |
+| `id` | `bigint` **IDENTITY** PK (`002` `autoIncrement: true`) | Surrogate key; DB assigns on insert; used in history sort tie-break |
 | `shipment_id` | `varchar(64)` | Groups audit per shipment |
 | `partner` | `varchar(64)` | Courier code |
-| `event_id` | `varchar(128)` NOT NULL | Dedupe key with `partner`; synthetic value for `DUPLICATE` rows |
+| `event_id` | `varchar(128)` nullable (Phase 2) | Required for event-id partners in API; null allowed for `acme`; synthetic value for `DUPLICATE` rows |
 | `status` | `varchar(32)` | Raw status string from payload |
 | `occurred_at` / `received_at` | timestamptz | Business time vs ingest time |
 | `location` | `varchar(255)` nullable | Optional |
@@ -243,13 +272,13 @@ Repository: `ShipmentEventRepository.findByShipmentIdOrderByOccurredAtAscReceive
 
 ---
 
-## Dedupe by phase (summary)
+## Dedupe by partner (summary)
 
 
-| Partner | Phase 1 (implemented)           | Phase 2 (planned)                             |
-| ------- | ------------------------------- | --------------------------------------------- |
-| `dhl`   | `(partner, event_id)`           | Same                                          |
-| `acme`  | Not supported (needs `eventId`) | `(partner, shipment_id, status, occurred_at)` |
+| Partner | Logical duplicate key | Enforced in |
+| ------- | --------------------- | ----------- |
+| `dhl`   | `(partner, event_id)` | Service (`EventIdDedupeStrategy`) + `uk_partner_event_id` |
+| `acme`  | `(partner, shipment_id, status, occurred_at)` | Service only (`NaturalKeyDedupeStrategy`) |
 
 
 ---
@@ -261,12 +290,32 @@ Repository: `ShipmentEventRepository.findByShipmentIdOrderByOccurredAtAscReceive
 | ------------------------------- | --------------- | ---------------------------------- |
 | Column set on `shipment`        | 9 columns       | `ShipmentEntity` ✓                 |
 | Column set on `shipment_event`  | 14 columns      | `ShipmentEventEntity` ✓            |
-| UK `uk_partner_event_id`        | 002             | `existsByPartnerAndEventId` + UK ✓ |
+| `id` BIGINT auto-increment      | `002`           | `GenerationType.IDENTITY` ✓        |
+| UK `uk_partner_event_id`        | 002             | `EventIdDedupeStrategy` + synthetic dup `event_id` ✓ |
+| No `uk_partner_natural_key`     | `004` drops UK  | `NaturalKeyDedupeStrategy` ✓       |
+| Nullable `event_id`           | `003`           | `acme` ingest without `eventId` ✓  |
 | Timeline index                  | 002             | Repository method name matches ✓   |
 | No FK shipment_event → shipment | —               | Application-only link ✓            |
-| Changelog `003`                 | Phase 2 only    | Not present ✓                      |
 
 
 ---
 
-*Phase 1 schema matches implementation. Phase 2 section is unchanged planned work for Commit 2.*
+*Schema matches implementation. Natural-key dedupe is application-enforced by design (§ Dedupe enforcement).*
+
+---
+
+## Implementation reconciliation (deltas from initial design)
+
+Earlier sections retain the **original** Phase 1 / Phase 2 design narrative. The table below records **as-built** schema behaviour discovered during implementation (nothing above is removed).
+
+| # | Initial ERD / migration plan | As implemented | How we picked it up |
+|---|------------------------------|----------------|---------------------|
+| 1 | Phase 2: add **`uk_partner_natural_key`** on `(partner, shipment_id, status, occurred_at)` | **`003`** added UK; **`004`** **drops** it — running DB has **no** natural-key UK | `ChangeRequestIntegrationTest` step 12 — insert `DUPLICATE` row hit `23505` |
+| 2 | Dedupe “in DB” for all partners (Phase overview) | **`uk_partner_event_id` only** (`002`); `acme` dedupe via repository `exists…` in service | Same test + [`../ANALYSIS.md`](../ANALYSIS.md) §6.4 |
+| 3 | Duplicate audit `event_id` = `{logicalId}::dup::…` (Phase 1 text) | **`dhl`:** `{eventId}::dup::{nano}`. **`acme` duplicate:** `nk::{partner}::{shipmentId}::{status}::{occurredAt}::dup::{nano}`; **`acme` accepted:** `event_id` **NULL** | GET `/shipments/ship-acme-001/events` (walkthrough step 13) |
+| 4 | Phase 2 ERD snippet implied `id` might change in `004` | **`id`** remains **`002`** BIGINT **auto-increment**; `004` only drops UK | Doc review vs Liquibase files (DEVELOPMENT_PROCESS audit) |
+| 5 | Partial unique index `WHERE disposition <> 'DUPLICATE'` | **Not used** — H2 does not support; application dedupe only for natural-key | Attempted fix after row 1 failure; rejected in § Dedupe enforcement |
+
+**Repository detail (not on ERD diagram):** natural-key duplicate detection uses `existsByPartnerAndShipmentIdAndStatusAndOccurredAtAndDispositionIsNot(…, 'DUPLICATE')` so only **non-duplicate** rows define “already accepted” for the same natural key.
+
+See also: [`../ANALYSIS.md`](../ANALYSIS.md) §14 · [`CLASS_DIAGRAM.md`](CLASS_DIAGRAM.md) § Implementation reconciliation.

@@ -5,3 +5,9 @@ databaseChangeLog:
   - include:
       file: 002-create-shipment-event.yaml
       relativeToChangelogFile: true
+  - include:
+      file: 003-phase2-natural-key.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: 004-natural-key-partial-index.yaml
+      relativeToChangelogFile: true

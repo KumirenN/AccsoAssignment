@@ -107,6 +107,9 @@ public class ShipmentPersistenceMapper {
      * Returns the partner-visible event id, stripping the internal duplicate suffix (ADR 002).
      */
     public static String logicalEventId(String storedEventId) {
+        if (storedEventId == null) {
+            return null;
+        }
         int dup = storedEventId.indexOf(DUPLICATE_EVENT_ID_SUFFIX);
         return dup >= 0 ? storedEventId.substring(0, dup) : storedEventId;
     }
