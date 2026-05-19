@@ -66,7 +66,7 @@ Optional tracker while you work through the flow on `ship-demo-001`. Tick each s
 | 7 | Invalid payload (§7.4) |
 | 8 | **`stateExplanation`** (§7.7) |
 | 9–10 | Chronological history (§7.8) + 404 |
-| 11–12 | **Phase 2 only** — skip until change-request commit |
+| 11–12 | **Phase 2** — `acme` natural-key dedupe |
 
 ---
 
@@ -323,9 +323,9 @@ Automated: `givenOnlyInvalidIngest_whenGetEvents_then200ButGetShipment404` in `S
 
 ---
 
-## Phase 2 — Change request (`acme`) — not in Phase 1 build
+## Phase 2 — Change request (`acme`)
 
-**Not available in the Phase 1 build.** Requires Commit 2 (natural-key partner). Steps 11–12 are here for when you implement or review the change request.
+Partner `acme` uses natural-key dedupe `(partner, shipment_id, status, occurred_at)` — no `eventId` required. Configured in `application.yml` (see `docs/ANALYSIS.md` §6).
 
 ### Step 11 — First ingest (no `eventId`)
 
@@ -362,7 +362,7 @@ curl -s -X POST http://localhost:8080/shipment-events \
 ```
 
 **Expected:** `duplicate: true`, `stateChanged: false`  
-Automated later: `ChangeRequestIntegrationTest` (Phase 2).
+Automated: `ChangeRequestIntegrationTest` (`step11_…`, `step12_…`).
 
 ---
 
@@ -381,6 +381,9 @@ Automated later: `ChangeRequestIntegrationTest` (Phase 2).
 | 9 | `step09_givenDemoHistory_whenGetEvents_thenChronologicalWithAllDispositions` |
 | 10 | `step10_givenUnknownId_whenGetShipment_then404` / `step10b_..._whenGetEvents_then404` |
 | Invalid-only extra | `givenOnlyInvalidIngest_whenGetEvents_then200ButGetShipment404` |
+| 11 | `step11_givenAcmePartner_whenInTransitPostedWithoutEventId_thenAccepted` |
+| 12 | `step12_givenAcmeInTransit_whenSameUpdateDifferentReceivedAt_thenDuplicate` |
+| dhl without eventId | `givenDhlPartner_whenPostWithoutEventId_then400` |
 | Projection rules | `StateProjectorTest` (`given_*_when_*_then_*`) |
 
 See [`ANALYSIS.md`](ANALYSIS.md) §9.

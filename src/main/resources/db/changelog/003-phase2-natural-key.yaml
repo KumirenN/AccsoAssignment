@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-phase2-natural-key
+      author: accso
+      changes:
+        - sql:
+            sql: ALTER TABLE shipment_event ALTER COLUMN event_id SET NULL
+        - addUniqueConstraint:
+            tableName: shipment_event
+            columnNames: partner, shipment_id, status, occurred_at
+            constraintName: uk_partner_natural_key

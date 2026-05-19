@@ -11,7 +11,8 @@ import java.time.Instant;
 
 /**
  * JPA mapping for {@code shipment_event} — immutable ingest audit (every POST writes a row;
- * docs/ANALYSIS.md §7.1, §7.4). UK on {@code (partner, event_id)}.
+ * docs/ANALYSIS.md §7.1, §7.4). UK on {@code (partner, event_id)}; Phase 2 adds
+ * {@code uk_partner_natural_key} and nullable {@code event_id} for natural-key partners.
  */
 @Entity
 @Table(name = "shipment_event")
@@ -28,7 +29,7 @@ public class ShipmentEventEntity {
     @Column(name = "partner", length = 64, nullable = false)
     private String partner;
 
-    @Column(name = "event_id", length = 128, nullable = false)
+    @Column(name = "event_id", length = 128, nullable = true)
     private String eventId;
 
     @Column(name = "status", length = 32, nullable = false)

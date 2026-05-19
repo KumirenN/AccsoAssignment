@@ -1,6 +1,6 @@
 # Shipment tracking service
 
-Spring Boot microservice for the Accso technical assignment — **Phase 1** ingest, projection, and query APIs with H2 + Liquibase.
+Spring Boot microservice for the Accso technical assignment — ingest, projection, and query APIs with H2 + Liquibase. **Phase 1** (`dhl` event-id dedupe) + **Phase 2** change request (`acme` natural-key dedupe).
 
 ## For reviewers (Accso)
 
@@ -12,7 +12,7 @@ The assignment asks for a README covering problem framing, assumptions, design t
 | **Assumptions** | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §3 |
 | **Design choices & trade-offs** (why this approach vs alternatives) | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §7, §10 · ADRs [`docs/adr/001`](docs/adr/001-forward-only-shipment-status-projection.md), [`002`](docs/adr/002-deduplication-strategy-and-database-constraints.md) |
 | **Known limitations** | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §3.1 |
-| **Change request** (what changed / what stayed the same) | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §6 (Phase 2) — after Commit 2 |
+| **Change request** (what changed / what stayed the same) | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) §6 |
 | **AI / development process** | [`docs/DEVELOPMENT_PROCESS.md`](docs/DEVELOPMENT_PROCESS.md) |
 | **Try the APIs hands-on** | [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) |
 | **Schema & class design** | [`docs/design/DATABASE_ERD.md`](docs/design/DATABASE_ERD.md), [`CLASS_DIAGRAM.md`](docs/design/CLASS_DIAGRAM.md) |
@@ -46,8 +46,18 @@ Service listens on **http://localhost:8080**.
 - **Liquibase** changelogs: `src/main/resources/db/changelog/`
   - `001-create-shipment.yaml` — `shipment` table  
   - `002-create-shipment-event.yaml` — `shipment_event` + `uk_partner_event_id` + timeline index  
+  - `003-phase2-natural-key.yaml` — nullable `event_id`, `uk_partner_natural_key`  
 
 JPA `ddl-auto` is **validate** — schema is owned by Liquibase; entities must match.
+
+### Partner dedupe (Phase 2)
+
+| Partner | Strategy | Dedupe key |
+|---------|----------|------------|
+| `dhl` | `event-id` | `(partner, eventId)` — `eventId` required |
+| `acme` | `natural-key` | `(partner, shipmentId, status, occurredAt)` — `eventId` optional |
+
+Configured in `src/main/resources/application.yml` under `shipment.partners`.
 
 ## Docs
 
@@ -75,7 +85,7 @@ Coverage report (JaCoCo, includes `ShipmentTrackingApplication.main` via applica
 
 Open `target/site/jacoco/index.html`.
 
-## API (Phase 1)
+## API
 
 | Method | Path | Purpose |
 |--------|------|---------|

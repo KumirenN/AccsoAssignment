@@ -7,13 +7,13 @@ import java.time.Instant;
 /**
  * JSON body for {@code POST /shipment-events} (docs/ANALYSIS.md §8).
  *
- * <p>{@code eventId} required in Phase 1 for dedupe (§7.1). {@code occurredAt} drives projection;
- * {@code receivedAt} is audit/tie-break only (§7.8).
+ * <p>{@code eventId} required for event-id partners ({@code dhl}); optional for natural-key
+ * partners ({@code acme}) — see {@code application.yml} (docs/ANALYSIS.md §6.1). {@code occurredAt}
+ * drives projection; {@code receivedAt} is audit/tie-break only (§7.8).
  */
 public class IngestShipmentEventRequest {
 
-    /** Partner-supplied id; dedupe key with {@code partner} (§7.1). */
-    @NotBlank
+    /** Partner-supplied id; required when partner uses event-id dedupe (§7.1). */
     private String eventId;
 
     @NotBlank

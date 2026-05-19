@@ -2,6 +2,7 @@ package com.accso.shipment.application;
 
 import com.accso.shipment.api.dto.IngestShipmentEventResponse;
 import com.accso.shipment.application.command.IngestShipmentEventCommand;
+import com.accso.shipment.application.dedupe.DedupeStrategy;
 import com.accso.shipment.application.result.IngestResult;
 import com.accso.shipment.domain.model.Disposition;
 import com.accso.shipment.domain.model.DomainEvent;
@@ -9,6 +10,7 @@ import com.accso.shipment.domain.model.ShipmentSnapshot;
 import com.accso.shipment.domain.model.ShipmentStatus;
 import com.accso.shipment.domain.projection.ProjectionResult;
 import com.accso.shipment.domain.projection.StateProjector;
+import com.accso.shipment.infrastructure.dedupe.DedupeStrategyResolver;
 import com.accso.shipment.infrastructure.persistence.entity.ShipmentEntity;
 import com.accso.shipment.infrastructure.persistence.entity.ShipmentEventEntity;
 import com.accso.shipment.infrastructure.persistence.mapper.ShipmentPersistenceMapper;
@@ -22,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * Use case for {@code POST /shipment-events} (courier webhook ingest).
@@ -29,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>High-level pipeline — docs/ANALYSIS.md §7:
  * <ol>
  *   <li>§7.4 — invalid status: audit row, HTTP 400, no {@code shipment} update</li>
- *   <li>§7.1 — duplicate {@code (partner, eventId)}: audit row, HTTP 200, no projection</li>
+ *   <li>§7.1 — duplicate (partner-specific key): audit row, HTTP 200, no projection</li>
  *   <li>§7.2–§7.3 — accepted: forward-only projection, update {@code shipment}</li>
  * </ol>
  */
@@ -43,49 +46,59 @@ public class IngestShipmentEventService {
     private final StateProjector stateProjector;
     private final PayloadHasher payloadHasher;
     private final ShipmentPersistenceMapper mapper;
+    private final DedupeStrategyResolver dedupeResolver;
 
     /**
-     * Creates the ingest service with repositories, projector, hasher, and mapper.
+     * Creates the ingest service with repositories, projector, hasher, mapper, and dedupe resolver.
      */
     public IngestShipmentEventService(
             ShipmentRepository shipmentRepository,
             ShipmentEventRepository eventRepository,
             StateProjector stateProjector,
             PayloadHasher payloadHasher,
-            ShipmentPersistenceMapper mapper) {
+            ShipmentPersistenceMapper mapper,
+            DedupeStrategyResolver dedupeResolver) {
         this.shipmentRepository = shipmentRepository;
         this.eventRepository = eventRepository;
         this.stateProjector = stateProjector;
         this.payloadHasher = payloadHasher;
         this.mapper = mapper;
+        this.dedupeResolver = dedupeResolver;
     }
 
     /**
      * Entry point: validate, dedupe, or accept-and-project. Runs in a single transaction.
      *
-     * @return {@link IngestResult} — controller maps {@code invalidStatus} to HTTP 400 (§7.4)
+     * @return {@link IngestResult} — controller maps validation failures to HTTP 400
      */
     @Transactional
     public IngestResult ingest(IngestShipmentEventCommand command) {
+        DedupeStrategy dedupe = dedupeResolver.resolve(command.partner());
+
+        if (dedupe.requiresEventId() && !StringUtils.hasText(command.eventId())) {
+            return IngestResult.forMissingEventId();
+        }
+
         IngestAuditContext audit = new IngestAuditContext(
                 command, payloadHasher.hash(command.rawPayload()), Instant.now());
 
         Optional<ShipmentStatus> status = ShipmentStatus.fromString(command.status());
         if (status.isEmpty()) {
-            return rejectInvalidStatus(audit);
+            return rejectInvalidStatus(audit, dedupe);
         }
-        if (isDuplicate(command)) {
-            return ingestDuplicate(audit);
+        if (dedupe.isDuplicate(command)) {
+            return ingestDuplicate(audit, dedupe);
         }
-        return ingestAccepted(audit, status.get());
+        return ingestAccepted(audit, status.get(), dedupe);
     }
 
     /**
      * Persists {@code REJECTED_INVALID} audit row; does not create or update {@code shipment}
      * (docs/ANALYSIS.md §7.4).
      */
-    private IngestResult rejectInvalidStatus(IngestAuditContext audit) {
-        saveAuditRow(audit, audit.command().eventId(), Disposition.REJECTED_INVALID, false);
+    private IngestResult rejectInvalidStatus(IngestAuditContext audit, DedupeStrategy dedupe) {
+        String storedEventId = dedupe.storageEventIdForInsert(audit.command(), false);
+        saveAuditRow(audit, storedEventId, Disposition.REJECTED_INVALID, false);
         log.info(
                 "Ingest rejected invalid status partner={} shipmentId={} eventId={} status={}",
                 audit.command().partner(),
@@ -96,21 +109,14 @@ public class IngestShipmentEventService {
     }
 
     /**
-     * Phase 1 dedupe key: {@code (partner, eventId)} (docs/ANALYSIS.md §7.1, §5.1).
-     */
-    private boolean isDuplicate(IngestShipmentEventCommand command) {
-        return eventRepository.existsByPartnerAndEventId(command.partner(), command.eventId());
-    }
-
-    /**
      * Handles duplicate webhook: HTTP 200, full audit row, {@code stateChanged=false}
-     * (docs/ANALYSIS.md §7.1; assumption table — duplicate returns 200).
+     * (docs/ANALYSIS.md §7.1).
      */
-    private IngestResult ingestDuplicate(IngestAuditContext audit) {
+    private IngestResult ingestDuplicate(IngestAuditContext audit, DedupeStrategy dedupe) {
         IngestShipmentEventCommand command = audit.command();
-        boolean payloadMismatch = detectPayloadMismatch(audit);
+        boolean payloadMismatch = detectPayloadMismatch(audit, dedupe);
 
-        String storageEventId = ShipmentPersistenceMapper.duplicateStorageEventId(command.eventId());
+        String storageEventId = dedupe.storageEventIdForInsert(command, true);
         saveAuditRow(audit, storageEventId, Disposition.DUPLICATE, false);
 
         String currentStatus = shipmentRepository
@@ -123,22 +129,19 @@ public class IngestShipmentEventService {
     }
 
     /**
-     * Compares SHA-256 of this payload to the first stored row for the same partner event id
-     * (docs/ANALYSIS.md §7.1 — payload mismatch flag on POST).
+     * Compares SHA-256 of this payload to the first stored row for the same dedupe key (§7.1).
      */
-    private boolean detectPayloadMismatch(IngestAuditContext audit) {
+    private boolean detectPayloadMismatch(IngestAuditContext audit, DedupeStrategy dedupe) {
         IngestShipmentEventCommand command = audit.command();
-        Optional<ShipmentEventEntity> firstSeen = eventRepository.findFirstByPartnerAndEventIdOrderByIdAsc(
-                command.partner(), command.eventId());
+        Optional<String> canonicalHash = dedupe.findCanonicalPayloadHash(command);
 
-        boolean mismatch =
-                firstSeen.isPresent() && !firstSeen.get().getPayloadHash().equals(audit.payloadHash());
+        boolean mismatch = canonicalHash.isPresent() && !canonicalHash.get().equals(audit.payloadHash());
         if (mismatch) {
             log.warn(
-                    "Payload mismatch on duplicate partner={} eventId={} shipmentId={}",
+                    "Payload mismatch on duplicate partner={} shipmentId={} status={}",
                     command.partner(),
-                    command.eventId(),
-                    command.shipmentId());
+                    command.shipmentId(),
+                    command.status());
         }
         return mismatch;
     }
@@ -147,7 +150,8 @@ public class IngestShipmentEventService {
      * Accepted path: load history, project with {@link StateProjector}, persist audit + shipment
      * (docs/ANALYSIS.md §7.2–§7.3, §7.7).
      */
-    private IngestResult ingestAccepted(IngestAuditContext audit, ShipmentStatus status) {
+    private IngestResult ingestAccepted(
+            IngestAuditContext audit, ShipmentStatus status, DedupeStrategy dedupe) {
         IngestShipmentEventCommand command = audit.command();
         ShipmentEntity shipment = findOrCreateShipment(command.shipmentId(), audit.ingestedAt());
 
@@ -157,7 +161,8 @@ public class IngestShipmentEventService {
         ShipmentSnapshot before = mapper.toSnapshot(shipment);
         ProjectionResult projection = stateProjector.projectNewEvent(before, priorAccepted, incoming);
 
-        saveAuditRow(audit, command.eventId(), projection.disposition(), projection.stateChanged());
+        String storedEventId = dedupe.storageEventIdForInsert(command, false);
+        saveAuditRow(audit, storedEventId, projection.disposition(), projection.stateChanged());
         updateShipmentFromProjection(shipment, projection, audit.ingestedAt());
 
         log.info(

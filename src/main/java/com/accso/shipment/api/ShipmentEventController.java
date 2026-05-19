@@ -43,6 +43,12 @@ public class ShipmentEventController {
         IngestShipmentEventCommand command = toCommand(request, rawPayload);
 
         IngestResult result = ingestService.ingest(command);
+        if (result.missingEventId()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ErrorResponse(
+                            "MISSING_EVENT_ID",
+                            "eventId is required for partner: " + request.getPartner()));
+        }
         if (result.invalidStatus()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(new ErrorResponse(
