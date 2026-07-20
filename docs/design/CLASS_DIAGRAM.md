@@ -1,9 +1,9 @@
 # Technical design — UML class diagram
 
 **Source of truth with:** [`../ANALYSIS.md`](../ANALYSIS.md), [`DATABASE_ERD.md`](DATABASE_ERD.md)  
-**Package:** `com.accso.shipment`  
+**Package:** `com.shipment.tracking`  
 
-**Commits:** Phase 1 classes in **Commit 1**. Phase 2 classes in **Commit 2** only.
+**Commits:** Phase 1 classes in core delivery. Phase 2 classes in extension delivery.
 
 **As-implemented:** Reconciled to match the codebase (Phase 1 + Phase 2) on 2026-05-19.
 
@@ -22,7 +22,7 @@ Diagrams use **Mermaid**. See [`README.md`](README.md).
 | Dedupe | Inline in `IngestShipmentEventService` | `DedupeStrategy` + `DedupeStrategyResolver` + yaml — **logic in service, not DB UK for natural-key** (see § Dedupe enforcement) |
 | Config | `DomainConfiguration` (`StateProjector` bean only) | `PartnerConfigProperties` |
 | Validation | `eventId` required via service for event-id partners | Optional `eventId` for `acme`; `MISSING_EVENT_ID` if required and absent |
-| Tests | `StateProjectorTest`, `ShipmentFlowIntegrationTest`, `ShipmentTrackingApplicationTests` | `ChangeRequestIntegrationTest` |
+| Tests | `StateProjectorTest`, `ShipmentFlowIntegrationTest`, `ShipmentTrackingApplicationTests` | `NaturalKeyDedupeIntegrationTest` |
 
 **Both phases:** `StateProjector`, three REST endpoints, JPA entities, `ShipmentPersistenceMapper`, domain records (`DomainEvent`, `ShipmentSnapshot`, `ProjectionResult`).
 
@@ -282,7 +282,7 @@ sequenceDiagram
 ## Phase 1 — package tree (as implemented)
 
 ```
-com.accso.shipment/
+com.shipment.tracking/
 ├── ShipmentTrackingApplication.java
 ├── api/
 │   ├── ShipmentEventController.java
@@ -434,7 +434,7 @@ sequenceDiagram
 | `StateProjectorTest` | 1 | Domain rules unit tests |
 | `ShipmentFlowIntegrationTest` | 1 | Walkthrough steps 1–10 (`step01_` … `step10b_`) |
 | `ShipmentTrackingApplicationTests` | 1 | Context + `main` via `useMainMethod=ALWAYS` |
-| `ChangeRequestIntegrationTest` | **2** | Walkthrough steps 11–12, 16; 3 tests total |
+| `NaturalKeyDedupeIntegrationTest` | **2** | Walkthrough steps 11–12, 16; 3 tests total |
 
 ---
 
@@ -473,7 +473,7 @@ Phase 1 diagrams above describe **Commit 1** structure; the **current codebase**
 | 6 | `IngestResult` = response + `invalidStatus` | **Added:** `missingEventId` flag (Phase 2) | Controller + `IngestResult.java` |
 | 7 | `duplicateStorageEventId(partnerEventId)` only | **`NaturalKeyDedupeStrategy`** uses **`naturalKeyToken(command)`** + same `::dup::` suffix helper | History API shows `nk::acme::…` on duplicate rows |
 | 8 | `DedupeStrategy.constraintName()` (planned Phase 2 sketch) | **Not implemented** — interface has `requiresEventId`, `isDuplicate`, `findCanonicalPayloadHash`, `storageEventIdForInsert` | Replaced during implementation (DB UK not universal) |
-| 9 | Tests table: `ChangeRequestIntegrationTest` steps 11–12 only | **Also:** `givenDhlPartner_whenPostWithoutEventId_then400`; walkthrough steps **13–16** are **manual** | Test class + walkthrough expansion |
+| 9 | Tests table: `NaturalKeyDedupeIntegrationTest` steps 11–12 only | **Also:** `givenDhlPartner_whenPostWithoutEventId_then400`; walkthrough steps **13–16** are **manual** | Test class + walkthrough expansion |
 | 10 | Phase 1 architecture diagram: no dedupe package | Current tree adds **`application/dedupe`**, **`infrastructure/dedupe`**, **`infrastructure/config`** | `src/main/java` listing |
 
 **Unchanged vs design:** `StateProjector`, three controllers, `ShipmentPersistenceMapper`, `PayloadHasher`, `DomainConfiguration`, GET history 404 rule (`shipment` OR audit exists).

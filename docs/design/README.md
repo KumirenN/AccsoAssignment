@@ -1,6 +1,6 @@
 # Technical design
 
-Design docs for the shipment tracking service. **Read Phase 1 and Phase 2 sections separately** — Commit 1 must not include Phase 2 code.
+Design docs for the shipment tracking service. **Read Phase 1 and Phase 2 sections separately** — Phase 1 is the core service; Phase 2 is the multi-partner extension.
 
 ## Document index
 
@@ -31,12 +31,12 @@ If diagrams look like code blocks only, your viewer does not support Mermaid —
 
 ---
 
-## Git commits vs design
+## Implementation phases vs design
 
-| Commit | Phase | Design docs to follow |
-|--------|-------|------------------------|
-| **1** | Phase 1 | `DATABASE_ERD.md` § Phase 1, `CLASS_DIAGRAM.md` § Phase 1 |
-| **2** | Phase 2 | Same files § Phase 2 (planned changes only) |
+| Phase | Design docs to follow |
+|-------|------------------------|
+| **Phase 1** | `DATABASE_ERD.md` § Phase 1, `CLASS_DIAGRAM.md` § Phase 1 |
+| **Phase 2** | Same files § Phase 2 |
 
 ---
 

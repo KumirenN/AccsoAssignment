@@ -1,7 +1,7 @@
 # Database design — ERD
 
 **Source of truth with:** `[../ANALYSIS.md](../ANALYSIS.md)` (Phase 1 vs Phase 2)  
-**DB:** H2 in-memory (assignment) · **Schema:** Liquibase  
+**DB:** H2 in-memory (PoC) · **Schema:** Liquibase  
 
 **Commits:** Phase 1 schema in **Commit 1**. Phase 2 adds changelogs `003`–`004` in **Commit 2**.
 
@@ -155,7 +155,7 @@ db/changelog/
 
 | Approach | Verdict |
 |----------|---------|
-| **Separate table per courier** | Clear per-partner constraints; rejected for this assignment — more schema, joins, and ops complexity. |
+| **Separate table per courier** | Clear per-partner constraints; rejected for this PoC — more schema, joins, and ops complexity. |
 | **Partial unique index** (`WHERE disposition <> 'DUPLICATE'`) | Correct on PostgreSQL; **not supported on H2**, so not used for the PoC. |
 | **Application-layer dedupe (chosen)** | `DedupeStrategy` + yaml partner config; proactive checks before insert; keep `uk_partner_event_id` only where it fits. |
 
@@ -310,7 +310,7 @@ Earlier sections retain the **original** Phase 1 / Phase 2 design narrative. The
 
 | # | Initial ERD / migration plan | As implemented | How we picked it up |
 |---|------------------------------|----------------|---------------------|
-| 1 | Phase 2: add **`uk_partner_natural_key`** on `(partner, shipment_id, status, occurred_at)` | **`003`** added UK; **`004`** **drops** it — running DB has **no** natural-key UK | `ChangeRequestIntegrationTest` step 12 — insert `DUPLICATE` row hit `23505` |
+| 1 | Phase 2: add **`uk_partner_natural_key`** on `(partner, shipment_id, status, occurred_at)` | **`003`** added UK; **`004`** **drops** it — running DB has **no** natural-key UK | `NaturalKeyDedupeIntegrationTest` step 12 — insert `DUPLICATE` row hit `23505` |
 | 2 | Dedupe “in DB” for all partners (Phase overview) | **`uk_partner_event_id` only** (`002`); `acme` dedupe via repository `exists…` in service | Same test + [`../ANALYSIS.md`](../ANALYSIS.md) §6.4 |
 | 3 | Duplicate audit `event_id` = `{logicalId}::dup::…` (Phase 1 text) | **`dhl`:** `{eventId}::dup::{nano}`. **`acme` duplicate:** `nk::{partner}::{shipmentId}::{status}::{occurredAt}::dup::{nano}`; **`acme` accepted:** `event_id` **NULL** | GET `/shipments/ship-acme-001/events` (walkthrough step 13) |
 | 4 | Phase 2 ERD snippet implied `id` might change in `004` | **`id`** remains **`002`** BIGINT **auto-increment**; `004` only drops UK | Doc review vs Liquibase files (DEVELOPMENT_PROCESS audit) |

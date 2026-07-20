@@ -1,7 +1,7 @@
 databaseChangeLog:
   - changeSet:
       id: 001-create-shipment
-      author: accso
+      author: shipment
       changes:
         - createTable:
             tableName: shipment

@@ -1,7 +1,7 @@
 databaseChangeLog:
   - changeSet:
       id: 004-natural-key-partial-index
-      author: accso
+      author: shipment
       comment: >
         Phase 2 schema cleanup: drop uk_partner_natural_key (a full UK blocks DUPLICATE audit
         rows that repeat the same natural key). H2 has no partial unique indexes; acme dedupe
