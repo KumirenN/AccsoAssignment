@@ -4,13 +4,13 @@
 |---|---|
 | **Status** | Accepted |
 | **Date** | 2026-05-18 |
-| **Deciders** | Candidate (with AI-assisted analysis); see `docs/DEVELOPMENT_PROCESS.md` for override on `RETURNED` |
+| **Deciders** | Developer (with AI-assisted analysis); see `docs/DEVELOPMENT_PROCESS.md` for override on `RETURNED` |
 
 ## Context
 
 Courier partners send shipment events that may arrive **late**, **out of order**, **duplicated**, or **conflicting**. Downstream systems need a single **current status** per `shipmentId` plus an auditable history.
 
-The assignment suggests status values: `LABEL_CREATED`, `HANDED_TO_CARRIER`, `IN_TRANSIT`, `OUT_FOR_DELIVERY`, `DELIVERED`, `DELIVERY_EXCEPTION`, `RETURNED`.
+Supported status values: `LABEL_CREATED`, `HANDED_TO_CARRIER`, `IN_TRANSIT`, `OUT_FOR_DELIVERY`, `DELIVERED`, `DELIVERY_EXCEPTION`, `RETURNED`.
 
 We must choose how to derive **current status** from an unordered stream—not merely “last event received.”
 
@@ -42,7 +42,7 @@ Implementation: domain `StateProjector` (pure Java, unit-tested without Spring).
 
 ### Why we chose this
 
-Support and incident teams need a **stable current status** that reflects real-world progression, not webhook arrival order. Forward-only projection plus explicit RETURNED and exception rules is testable, matches the brief’s integrity goals, and avoids surprising regressions when old events arrive late.
+Support and incident teams need a **stable current status** that reflects real-world progression, not webhook arrival order. Forward-only projection plus explicit RETURNED and exception rules is testable and avoids surprising regressions when old events arrive late.
 
 ## Alternatives considered
 
@@ -51,7 +51,7 @@ Support and incident teams need a **stable current status** that reflects real-w
 | **Last-write-wins by `receivedAt`** | Hides late truth; fails when old events arrive after new ones. |
 | **Strict finite state machine only** | Hard to extend for `RETURNED` after `DELIVERED` without awkward states. |
 | **Recompute winner by max ordinal at each timestamp only** | Allows backward jumps when late low-ordinal events arrive; rejected in favour of forward-only. |
-| **`DELIVERED` as terminal (no further progress)** | Simple but wrong for returns; rejected after candidate review (see `DEVELOPMENT_PROCESS.md`). |
+| **`DELIVERED` as terminal (no further progress)** | Simple but wrong for returns; rejected after review (see `DEVELOPMENT_PROCESS.md`). |
 | **Always take highest ordinal at same `occurredAt`** | Adopted only for **conflict** cases (e.g. exception vs delivered); not for cross-time ordering. |
 
 ## Consequences

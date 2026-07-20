@@ -1,7 +1,7 @@
 databaseChangeLog:
   - changeSet:
       id: 003-phase2-natural-key
-      author: accso
+      author: shipment
       changes:
         - sql:
             sql: ALTER TABLE shipment_event ALTER COLUMN event_id SET NULL

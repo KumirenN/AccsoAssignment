@@ -1,7 +1,7 @@
 databaseChangeLog:
   - changeSet:
       id: 002-create-shipment-event
-      author: accso
+      author: shipment
       changes:
         - createTable:
             tableName: shipment_event

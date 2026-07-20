@@ -4,16 +4,16 @@
 |---|---|
 | **Status** | Accepted |
 | **Date** | 2026-05-18 |
-| **Deciders** | Candidate |
+| **Deciders** | Developer |
 
 ## Context
 
 Shipment events arrive via webhook. Partners may:
 
 - Retry the **same `eventId`** (phase 1 — e.g. DHL).
-- Resend the **same logical update** without a stable `eventId`**, with different `receivedAt`** (change request — e.g. partner `acme`).
+- Resend the **same logical update** without a stable `eventId`, with different `receivedAt` (Phase 2 — e.g. partner `acme`).
 
-The assignment emphasises **duplicates, ordering, and auditability** over feature breadth.
+The design prioritises **duplicates, ordering, and auditability** over feature breadth.
 
 ## Decision
 
@@ -62,7 +62,7 @@ Duplicates store the **complete row** even when payload duplicates an earlier ac
 
 ### Why we chose this
 
-The brief prioritises **auditability** and **idempotent webhooks**. Persisting every attempt with DB-backed keys (where possible) gives a defensible source of truth for support tools and integration tests, while HTTP 200 on duplicates avoids partner retry storms. Phase 2 extends the same pipeline with partner-specific keys without forking the ingest API.
+The design prioritises **auditability** and **idempotent webhooks**. Persisting every attempt with DB-backed keys (where possible) gives a defensible source of truth for support tools and integration tests, while HTTP 200 on duplicates avoids partner retry storms. Phase 2 extends the same pipeline with partner-specific keys without forking the ingest API.
 
 ## Alternatives considered
 
@@ -74,13 +74,13 @@ The brief prioritises **auditability** and **idempotent webhooks**. Persisting e
 | **Skip persisting duplicate rows** | Hides retries from consuming services; rejected for audit visibility. |
 | **`409 Conflict` on duplicate** | Partners often retry non-2xx; **200** idempotent response is webhook-friendly. |
 | **Inbound `partnerProvidesEventId` flag** | Pollutes partner contract; server-side config only. |
-| **Partial unique indexes per partner** | Single-table constraints sufficient for assignment scale. |
+| **Partial unique indexes per partner** | Single-table constraints sufficient for PoC scale. |
 
 ## Consequences
 
 ### Positive
 
-- Change request (no `eventId`) extends design without rewriting ingest pipeline.
+- Phase 2 extension (no `eventId`) extends design without rewriting ingest pipeline.
 - Dedupe survives process restart (within H2 session; production would use PostgreSQL).
 - Audit trail supports support and incident analysis.
 
@@ -96,7 +96,7 @@ Original decision text above is **retained**. As-built adjustments:
 
 | Initial ADR implication | As implemented | How we picked it up |
 |-------------------------|----------------|---------------------|
-| Phase 2 DB UK on natural key + optional `DataIntegrityViolationException` path | UK **removed** in Liquibase `004`; natural-key dedupe **proactive in service** | `ChangeRequestIntegrationTest` step 12 (`23505`) |
+| Phase 2 DB UK on natural key + optional `DataIntegrityViolationException` path | UK **removed** in Liquibase `004`; natural-key dedupe **proactive in service** | `NaturalKeyDedupeIntegrationTest` step 12 (`23505`) |
 | “Two unique constraints” (Consequences) | **One** effective UK: `(partner, event_id)` for event-id partners only | Schema review after `004` |
 | Duplicate storage always `{eventId}::dup::` | **`acme`:** `nk::…::dup::` token; accepted rows may have **null** `event_id` | GET history during walkthrough |
 | Alternatives: “Dedupe only in application layer” rejected | **Hybrid:** DB UK for `dhl`, application layer for `acme` | §6.4 / this reconciliation |
@@ -105,5 +105,4 @@ Full table: [`docs/ANALYSIS.md`](../ANALYSIS.md) §14.
 
 ## References
 
-- `docs/ANALYSIS.md` §4.2, §4.6, §5, §14
-- Assignment brief: duplicate / audit / change-request requirements
+- `docs/ANALYSIS.md` §7.1, §6, §14

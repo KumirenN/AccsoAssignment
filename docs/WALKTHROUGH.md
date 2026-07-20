@@ -1,12 +1,12 @@
 # Hands-on walkthrough
 
-Step-by-step guide for **developers** (or reviewers) to run the service locally, send real HTTP requests, and see how shipment ingest, projection, and read APIs behave. Each step is a small scenario you can try in isolation or as a full story on one shipment id.
+Step-by-step guide to run the service locally, send real HTTP requests, and see how shipment ingest, projection, and read APIs behave.
 
 Run **Phase 1** steps **1–10 in order** on a fresh app instance so later steps build on earlier state (`ship-demo-001`, partner `dhl`).
 
 **Phase 2** (steps **11–16**) uses a **different** shipment (`ship-acme-001`, partner `acme`). You can run it **after** Phase 1 on the same running app, or **alone** after a restart — it does not depend on `ship-demo-001`.
 
-The same flows are automated in `ShipmentFlowIntegrationTest` (steps 1–10) and `ChangeRequestIntegrationTest` (steps 11–12, `dhl` without `eventId`) if you prefer not to use curl.
+The same flows are automated in `ShipmentFlowIntegrationTest` (steps 1–10) and `NaturalKeyDedupeIntegrationTest` (steps 11–12, `dhl` without `eventId`) if you prefer not to use curl.
 
 **Not a formal test plan** — see [Author notes](#author-notes) at the end for how this doc was also used during implementation.
 
@@ -63,7 +63,7 @@ Optional tracker while you work through the flow on `ship-demo-001`. Tick each s
 
 ## What each step demonstrates
 
-| Step | Assignment topic |
+| Step | Topic |
 |------|------------------|
 | 1–2 | Ingest + forward status |
 | 3 | **Duplicate** events (§7.1) |
@@ -354,7 +354,7 @@ Automated: `givenOnlyInvalidIngest_whenGetEvents_then200ButGetShipment404` in `S
 
 ---
 
-## Phase 2 — Change request (`acme` + `dhl` validation)
+## Phase 2 — Multi-partner deduplication (`acme` + `dhl` validation)
 
 Partner **`acme`** uses **natural-key** dedupe: `(partner, shipment_id, status, occurred_at)` — no `eventId` on the webhook. Partner **`dhl`** still requires **`eventId`** (unchanged from Phase 1).
 
@@ -403,13 +403,13 @@ curl -s -X POST http://localhost:8080/shipment-events \
 
 **What this proves:** Natural-key partner ingest works without `eventId`; projection creates/updates `ship-acme-001`.
 
-Automated: `ChangeRequestIntegrationTest.step11_givenAcmePartner_whenInTransitPostedWithoutEventId_thenAccepted`.
+Automated: `NaturalKeyDedupeIntegrationTest.step11_givenAcmePartner_whenInTransitPostedWithoutEventId_thenAccepted`.
 
 ---
 
 ### Step 12 — `acme` resend (duplicate — same natural key, new `receivedAt`)
 
-Assignment change request: partner **retries the same logical update** with a later `receivedAt` (e.g. webhook redelivery).
+Partner **retries the same logical update** with a later `receivedAt` (e.g. webhook redelivery).
 
 ```bash
 curl -s -X POST http://localhost:8080/shipment-events \
@@ -438,7 +438,7 @@ curl -s -X POST http://localhost:8080/shipment-events \
 
 **What this proves:** Same logical update retried → `duplicate: true` + second audit row (`DUPLICATE`); service-layer dedupe — no DB UK on the natural key.
 
-Automated: `ChangeRequestIntegrationTest.step12_givenAcmeInTransit_whenSameUpdateDifferentReceivedAt_thenDuplicate`.
+Automated: `NaturalKeyDedupeIntegrationTest.step12_givenAcmeInTransit_whenSameUpdateDifferentReceivedAt_thenDuplicate`.
 
 ---
 
@@ -568,7 +568,7 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST http://localhost:8080/shipment-events
 
 **What this proves:** Partner config drives validation — `acme` may omit `eventId`; `dhl` may not.
 
-Automated: `ChangeRequestIntegrationTest.givenDhlPartner_whenPostWithoutEventId_then400`.
+Automated: `NaturalKeyDedupeIntegrationTest.givenDhlPartner_whenPostWithoutEventId_then400`.
 
 **Next:** Run the [optional](#phase-2--quick-negative-check-optional) out-of-order `acme` step, then [verify the full audit trail](#phase-2--verify-full-acme-history-after-optional) with GET below.
 
@@ -646,10 +646,10 @@ If you skip the optional step, expect **4** rows and `processedEventCount` **2**
 | 9 | `step09_givenDemoHistory_whenGetEvents_thenChronologicalWithAllDispositions` |
 | 10 | `step10_givenUnknownId_whenGetShipment_then404` / `step10b_..._whenGetEvents_then404` |
 | Invalid-only extra | `givenOnlyInvalidIngest_whenGetEvents_then200ButGetShipment404` |
-| 11 | `ChangeRequestIntegrationTest.step11_givenAcmePartner_whenInTransitPostedWithoutEventId_thenAccepted` |
-| 12 | `ChangeRequestIntegrationTest.step12_givenAcmeInTransit_whenSameUpdateDifferentReceivedAt_thenDuplicate` |
+| 11 | `NaturalKeyDedupeIntegrationTest.step11_givenAcmePartner_whenInTransitPostedWithoutEventId_thenAccepted` |
+| 12 | `NaturalKeyDedupeIntegrationTest.step12_givenAcmeInTransit_whenSameUpdateDifferentReceivedAt_thenDuplicate` |
 | 13–15 | Manual / runtime only (history + forward + payload mismatch) |
-| 16 | `ChangeRequestIntegrationTest.givenDhlPartner_whenPostWithoutEventId_then400` |
+| 16 | `NaturalKeyDedupeIntegrationTest.givenDhlPartner_whenPostWithoutEventId_then400` |
 | Projection rules | `StateProjectorTest` (`given_*_when_*_then_*`) |
 
 See [`ANALYSIS.md`](ANALYSIS.md) §9.
@@ -669,7 +669,7 @@ During implementation I **also** used this document as an informal **runtime ver
 | Phase | Runtime steps | Automated tests |
 |-------|----------------|-----------------|
 | Phase 1 | 1–10 + invalid-only extra | `ShipmentFlowIntegrationTest`, `StateProjectorTest` |
-| Phase 2 | 11–16 (+ optional negative) | `ChangeRequestIntegrationTest` (11–12, 16) |
+| Phase 2 | 11–16 (+ optional negative) | `NaturalKeyDedupeIntegrationTest` (11–12, 16) |
 
 Steps **13–15** are especially useful to confirm **audit history** (`DUPLICATE` rows, `processedEventCount`, `payloadMismatch`) for natural-key dedupe — behaviour that is easy to miss if you only check the POST response.
 
