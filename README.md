@@ -1,6 +1,6 @@
 # Shipment tracking service
 
-Spring Boot microservice for the **Accso technical assignment** — ingest courier webhooks, project current shipment status, and expose audit history. **Phase 1** (`dhl`, event-id dedupe) + **Phase 2 change request** (`acme`, natural-key dedupe).
+Spring Boot microservice portfolio example — ingest courier webhooks, project current shipment status, and expose audit history. **Phase 1** (`dhl`, event-id dedupe) + **Phase 2 change request** (`acme`, natural-key dedupe).
 
 ---
 
